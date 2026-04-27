@@ -41,16 +41,25 @@ app.use('/api/notes', notesRouter);
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'OpsFly API' }));
 
-// ─── Database ─────────────────────────────────────────────────────────────────
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('✅ MongoDB connected');
-    app.listen(PORT, () => {
+// ─── Database & Startup ────────────────────────────────────────────────────────
+const startServer = async () => {
+  try {
+    // Start listening FIRST (Crucial for Railway/Render health checks)
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 OpsFly server running on port ${PORT}`);
     });
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
-  });
+
+    // Then connect to DB
+    if (!process.env.MONGODB_URI) {
+      console.error('❌ MONGODB_URI is missing in environment variables!');
+    } else {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log('✅ MongoDB connected');
+    }
+  } catch (err) {
+    console.error('❌ Startup error:', err.message);
+    // Don't exit immediately, let the server stay alive for logs
+  }
+};
+
+startServer();
