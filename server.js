@@ -11,11 +11,7 @@ const PORT = process.env.PORT || 5000;
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: [
-    'http://localhost:5173',   // Vite dev
-    'http://localhost:3000',   // fallback
-    /\.vercel\.app$/           // any Vercel preview/prod URL
-  ],
+  origin: '*', 
   credentials: true,
 }));
 app.use(morgan('dev'));
