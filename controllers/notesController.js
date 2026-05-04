@@ -1,90 +1,61 @@
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const Note = require('../models/Note');
-const { transcribeAudio } = require('../services/whisper');
 const { analyzeTranscript } = require('../services/analyzer');
+const OpenAI = require('openai');
+const fs = require('fs');
+const path = require('path');
 
-// ─── Multer config (disk storage for audio uploads) ───────────────────────────
-const uploadsDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    const ext = path.extname(file.originalname) || '.webm';
-    cb(null, `audio-${unique}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB — Whisper limit
-}).single('audio');
-
-// ─── Controllers ──────────────────────────────────────────────────────────────
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * POST /api/notes/transcribe
- * Accepts an audio file, sends it to Whisper, returns the transcript.
+ * Upload audio → Whisper → transcript
  */
-const transcribeNote = (req, res) => {
-  upload(req, res, async (err) => {
-    if (err) {
-      console.error('Upload error:', err);
-      return res.status(400).json({ error: 'Audio upload failed', detail: err.message });
-    }
-
+const transcribeNote = async (req, res) => {
+  try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' });
+      return res.status(400).json({ error: 'No audio file uploaded' });
     }
 
-    try {
-      const mimeType = req.file.mimetype || 'audio/webm';
-      const transcript = await transcribeAudio(req.file.path, mimeType);
+    const audioPath = req.file.path;
+    console.log(`[Transcribe] Processing file: ${audioPath}`);
 
-      // M2: pass transcript to AI classifier here
-      // const issues = await classifyTranscript(transcript);
+    // Call Whisper API
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(audioPath),
+      model: 'whisper-1',
+    });
 
-      // Clean up temp file after successful transcription
-      fs.unlink(req.file.path, () => {});
+    const transcript = transcription.text;
+    console.log(`[Transcribe] Whisper result: ${transcript}`);
 
-      return res.json({
-        transcript,
-        rawAudio: req.file.filename, // filename stored for reference
-      });
-    } catch (error) {
-      console.error('--- WHISPER API ERROR ---');
-      console.error('Status:', error.status);
-      console.error('Type:', error.type);
-      console.error('Message:', error.message);
-      console.error('Code:', error.code);
-      console.error('Full Error:', JSON.stringify(error, null, 2));
-      console.error('--------------------------');
-      
-      fs.unlink(req.file.path, () => {}); // cleanup on error too
-      return res.status(500).json({ error: 'Transcription failed', detail: error.message });
-    }
-  });
+    // M2: Trigger AI analysis automatically after transcription
+    const analysis = await analyzeTranscript(transcript);
+
+    return res.json({ 
+      transcript,
+      issues: analysis.issues || []
+    });
+  } catch (error) {
+    console.error('Transcription error:', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Transcription failed', detail: error.message });
+  }
 };
 
 /**
  * POST /api/notes/analyze
- * Accepts transcript, returns AI-detected issues.
+ * Manual trigger for analysis (used for text notes)
  */
 const analyzeNote = async (req, res) => {
   try {
     const { transcript } = req.body;
     if (!transcript) {
-      return res.status(400).json({ error: 'Transcript is required for analysis' });
+      return res.status(400).json({ error: 'transcript is required' });
     }
-
-    const result = await analyzeTranscript(transcript);
-    return res.json(result);
+    const analysis = await analyzeTranscript(transcript);
+    return res.json(analysis);
   } catch (error) {
-    console.error('Analyze note error:', error);
-    return res.status(500).json({ error: 'Analysis failed', detail: error.message });
+    console.error('Analysis error:', error);
+    return res.status(500).json({ error: 'Analysis failed' });
   }
 };
 
@@ -94,7 +65,7 @@ const analyzeNote = async (req, res) => {
  */
 const saveNote = async (req, res) => {
   try {
-    const { transcript, source = 'voice', rawAudio, issues = [], analyzedAt } = req.body;
+    const { transcript, source = 'voice', rawAudio, issues, analyzedAt } = req.body;
 
     if (!transcript || typeof transcript !== 'string' || !transcript.trim()) {
       return res.status(400).json({ error: 'transcript is required' });
@@ -104,12 +75,9 @@ const saveNote = async (req, res) => {
       transcript: transcript.trim(),
       source,
       rawAudio: rawAudio || null,
-      issues,
-      analyzedAt: analyzedAt || (issues.length > 0 ? new Date() : null),
+      issues: issues || [],
+      analyzedAt: analyzedAt || null
     });
-
-    // M3: trigger task creation here
-    // trigger task creation here from note._id
 
     return res.status(201).json({ success: true, note });
   } catch (error) {
@@ -122,13 +90,13 @@ const saveNote = async (req, res) => {
  * GET /api/notes
  * Returns all notes sorted by newest first.
  */
-const getNotes = async (_req, res) => {
+const getNotes = async (req, res) => {
   try {
-    const notes = await Note.find().sort({ createdAt: -1 }).lean();
+    const notes = await Note.find().sort({ createdAt: -1 });
     return res.json(notes);
   } catch (error) {
     console.error('Get notes error:', error);
-    return res.status(500).json({ error: 'Failed to fetch notes', detail: error.message });
+    return res.status(500).json({ error: 'Failed to fetch notes' });
   }
 };
 
@@ -140,40 +108,12 @@ const deleteNote = async (req, res) => {
   try {
     const { id } = req.params;
     const note = await Note.findByIdAndDelete(id);
-    if (!note) {
-      return res.status(404).json({ error: 'Note not found' });
-    }
-    return res.json({ success: true, message: 'Note deleted' });
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    return res.json({ success: true });
   } catch (error) {
     console.error('Delete note error:', error);
-    return res.status(500).json({ error: 'Failed to delete note', detail: error.message });
+    return res.status(500).json({ error: 'Failed to delete note' });
   }
 };
 
-/**
- * PUT /api/notes/:id
- * Updates a specific note (e.g. issues or transcript).
- */
-const updateNote = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { issues, transcript } = req.body;
-    
-    const note = await Note.findByIdAndUpdate(
-      id,
-      { issues, transcript },
-      { new: true }
-    );
-    
-    if (!note) {
-      return res.status(404).json({ error: 'Note not found' });
-    }
-    
-    return res.json({ success: true, note });
-  } catch (error) {
-    console.error('Update note error:', error);
-    return res.status(500).json({ error: 'Failed to update note', detail: error.message });
-  }
-};
-
-module.exports = { transcribeNote, analyzeNote, saveNote, getNotes, deleteNote, updateNote };
+module.exports = { transcribeNote, analyzeNote, saveNote, getNotes, deleteNote };

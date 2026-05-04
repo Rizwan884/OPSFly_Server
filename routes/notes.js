@@ -1,13 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { 
-  transcribeNote, 
-  analyzeNote, 
-  saveNote, 
-  getNotes, 
-  deleteNote, 
-  updateNote 
-} = require('../controllers/notesController');
+const { transcribeNote, analyzeNote, saveNote, getNotes, deleteNote } = require('../controllers/notesController');
 
 // POST /api/notes/transcribe — upload audio → Whisper → transcript
 router.post('/transcribe', transcribeNote);
@@ -20,9 +13,6 @@ router.post('/save', saveNote);
 
 // GET /api/notes — fetch all notes newest first
 router.get('/', getNotes);
-
-// PUT /api/notes/:id — update a specific note (issues, transcript)
-router.put('/:id', updateNote);
 
 // DELETE /api/notes/:id — delete a specific note
 router.delete('/:id', deleteNote);
