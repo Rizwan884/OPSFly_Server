@@ -22,8 +22,17 @@ const noteSchema = new mongoose.Schema(
       enum: ['voice', 'text'],
       default: 'voice',
     },
-    // M2: issues: [{ type: String }],
-    // M2: summary: { type: String },
+    issues: [
+      {
+        type: { type: String },
+        severity: String,
+        quote: String,
+        suggestedTask: String
+      }
+    ],
+    analyzedAt: {
+      type: Date
+    }
   },
   {
     timestamps: true, // adds createdAt + updatedAt automatically

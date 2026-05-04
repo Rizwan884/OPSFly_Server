@@ -1,15 +1,28 @@
 const express = require('express');
 const router = express.Router();
-const { transcribeNote, saveNote, getNotes, deleteNote } = require('../controllers/notesController');
+const { 
+  transcribeNote, 
+  analyzeNote, 
+  saveNote, 
+  getNotes, 
+  deleteNote, 
+  updateNote 
+} = require('../controllers/notesController');
 
 // POST /api/notes/transcribe — upload audio → Whisper → transcript
 router.post('/transcribe', transcribeNote);
 
-// POST /api/notes/save — save transcript to MongoDB
+// POST /api/notes/analyze — transcript → OpenRouter → issues
+router.post('/analyze', analyzeNote);
+
+// POST /api/notes/save — save transcript + issues to MongoDB
 router.post('/save', saveNote);
 
 // GET /api/notes — fetch all notes newest first
 router.get('/', getNotes);
+
+// PUT /api/notes/:id — update a specific note (issues, transcript)
+router.put('/:id', updateNote);
 
 // DELETE /api/notes/:id — delete a specific note
 router.delete('/:id', deleteNote);

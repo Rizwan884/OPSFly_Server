@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const Note = require('../models/Note');
 const { transcribeAudio } = require('../services/whisper');
+const { analyzeTranscript } = require('../services/analyzer');
 
 // ─── Multer config (disk storage for audio uploads) ───────────────────────────
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -69,12 +70,31 @@ const transcribeNote = (req, res) => {
 };
 
 /**
+ * POST /api/notes/analyze
+ * Accepts transcript, returns AI-detected issues.
+ */
+const analyzeNote = async (req, res) => {
+  try {
+    const { transcript } = req.body;
+    if (!transcript) {
+      return res.status(400).json({ error: 'Transcript is required for analysis' });
+    }
+
+    const result = await analyzeTranscript(transcript);
+    return res.json(result);
+  } catch (error) {
+    console.error('Analyze note error:', error);
+    return res.status(500).json({ error: 'Analysis failed', detail: error.message });
+  }
+};
+
+/**
  * POST /api/notes/save
- * Saves a note (transcript + metadata) to MongoDB.
+ * Saves a note (transcript + issues + metadata) to MongoDB.
  */
 const saveNote = async (req, res) => {
   try {
-    const { transcript, source = 'voice', rawAudio } = req.body;
+    const { transcript, source = 'voice', rawAudio, issues = [], analyzedAt } = req.body;
 
     if (!transcript || typeof transcript !== 'string' || !transcript.trim()) {
       return res.status(400).json({ error: 'transcript is required' });
@@ -84,9 +104,12 @@ const saveNote = async (req, res) => {
       transcript: transcript.trim(),
       source,
       rawAudio: rawAudio || null,
+      issues,
+      analyzedAt: analyzedAt || (issues.length > 0 ? new Date() : null),
     });
 
-    // M2: trigger issue detection & task creation from note._id here
+    // M3: trigger task creation here
+    // trigger task creation here from note._id
 
     return res.status(201).json({ success: true, note });
   } catch (error) {
@@ -127,4 +150,30 @@ const deleteNote = async (req, res) => {
   }
 };
 
-module.exports = { transcribeNote, saveNote, getNotes, deleteNote };
+/**
+ * PUT /api/notes/:id
+ * Updates a specific note (e.g. issues or transcript).
+ */
+const updateNote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { issues, transcript } = req.body;
+    
+    const note = await Note.findByIdAndUpdate(
+      id,
+      { issues, transcript },
+      { new: true }
+    );
+    
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    
+    return res.json({ success: true, note });
+  } catch (error) {
+    console.error('Update note error:', error);
+    return res.status(500).json({ error: 'Failed to update note', detail: error.message });
+  }
+};
+
+module.exports = { transcribeNote, analyzeNote, saveNote, getNotes, deleteNote, updateNote };
