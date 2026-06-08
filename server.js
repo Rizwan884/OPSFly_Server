@@ -4,6 +4,10 @@ const morgan = require('morgan');
 const mongoose = require('mongoose');
 
 const notesRouter = require('./routes/notes');
+const organizationsRouter = require('./routes/organizations');
+const locationsRouter = require('./routes/locations');
+const usersRouter = require('./routes/users');
+const notificationsRouter = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,7 +24,7 @@ app.use((req, res, next) => {
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-location-id');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   // Handle preflight
@@ -37,6 +41,10 @@ app.use(express.json());
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/notes', notesRouter);
+app.use('/api/organizations', organizationsRouter);
+app.use('/api/locations', locationsRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'OpsFly API' }));

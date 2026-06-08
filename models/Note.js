@@ -32,6 +32,21 @@ const noteSchema = new mongoose.Schema(
     ],
     analyzedAt: {
       type: Date
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    locationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Location',
+      default: null,
+    },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null,
     }
   },
   {

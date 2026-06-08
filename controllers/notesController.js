@@ -4,6 +4,8 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
 
+// TODO: Replace with production OpenAI key when provided
+// TODO: Replace with production Gemini key when provided
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
