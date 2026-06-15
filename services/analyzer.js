@@ -7,6 +7,7 @@ const axios = require('axios');
  * transcribed text and extract operational issues.
  */
 
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const BASE_URL = 'https://openrouter.ai/api/v1';
 
@@ -45,7 +46,28 @@ no markdown, no extra text:
 If no issues are found return: { "issues": [] }`;
 
 /**
- * Analyzes a transcript using OpenRouter AI models with fallback logic.
+ * Helper to safely extract and parse JSON from LLM response.
+ */
+function parseJSONResponse(content) {
+  try {
+    let jsonStr = content.replace(/<think>[\s\S]*?<\/think>/g, '');
+    jsonStr = jsonStr.replace(/```json\n?|\n?```/g, '').trim();
+    
+    const firstBrace = jsonStr.indexOf('{');
+    const lastBrace = jsonStr.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+    }
+    
+    return JSON.parse(jsonStr);
+  } catch (parseError) {
+    console.error(`[Analyzer] Failed to parse JSON response:`, parseError.message);
+    return null;
+  }
+}
+
+/**
+ * Analyzes a transcript using Gemini API first, with OpenRouter fallback.
  * @param {string} transcript 
  * @returns {Promise<Object>} Analyzed issues
  */
@@ -54,9 +76,43 @@ async function analyzeTranscript(transcript) {
     return { issues: [] };
   }
 
-  // Unified prompt to avoid "system message not supported" errors
   const unifiedPrompt = `${SYSTEM_PROMPT}\n\nTRANSCRIPT TO ANALYZE:\n"${transcript}"`;
 
+  // 1. Try Google Gemini API directly
+  if (GEMINI_API_KEY) {
+    try {
+      console.log('[Analyzer] Attempting analysis with Google Gemini API (gemini-2.5-flash)...');
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: [{ role: 'user', parts: [{ text: unifiedPrompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json'
+          }
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 20000
+        }
+      );
+
+      const content = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (content) {
+        console.log('[Analyzer] Raw Gemini response:', content);
+        const parsed = parseJSONResponse(content);
+        if (parsed) {
+          console.log('[Analyzer] Successfully analyzed using Google Gemini API');
+          return parsed;
+        }
+      }
+    } catch (error) {
+      const errorData = error.response?.data || error.message;
+      console.error('[Analyzer] Google Gemini API failed:', errorData);
+    }
+  }
+
+  // 2. Fallback to OpenRouter free models
+  console.log('[Analyzer] Falling back to OpenRouter free models...');
   for (const model of MODELS) {
     try {
       console.log(`[Analyzer] Attempting analysis with model: ${model}`);
@@ -73,38 +129,21 @@ async function analyzeTranscript(transcript) {
           'HTTP-Referer': 'https://ops-fly-client.vercel.app',
           'X-Title': 'OpsFly'
         },
-        timeout: 20000 // 20s timeout
+        timeout: 20000
       });
 
       const content = response.data.choices[0].message.content;
-      console.log(`[Analyzer] Raw AI response from ${model}:`, content);
+      console.log(`[Analyzer] Raw AI response from OpenRouter model ${model}:`, content);
 
-      try {
-        // Handle DeepSeek/R1 "thinking" tags or markdown
-        let jsonStr = content.replace(/<think>[\s\S]*?<\/think>/g, '');
-        jsonStr = jsonStr.replace(/```json\n?|\n?```/g, '').trim();
-        
-        // Find the first { and last } to extract JSON if there's surrounding text
-        const firstBrace = jsonStr.indexOf('{');
-        const lastBrace = jsonStr.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1) {
-          jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
-        }
-
-        const parsed = JSON.parse(jsonStr);
-        
-        console.log(`[Analyzer] Successfully analyzed using ${model}`);
-        
+      const parsed = parseJSONResponse(content);
+      if (parsed) {
+        console.log(`[Analyzer] Successfully analyzed using OpenRouter ${model}`);
         return parsed;
-      } catch (parseError) {
-        console.error(`[Analyzer] Failed to parse JSON from ${model}. Raw content length: ${content.length}`);
-        continue; // Try next model if parse fails
       }
-
     } catch (error) {
       const errorData = error.response?.data?.error || error.message;
-      console.error(`[Analyzer] Error with model ${model}:`, errorData);
-      continue; // Try next model
+      console.error(`[Analyzer] Error with OpenRouter model ${model}:`, errorData);
+      continue;
     }
   }
 

@@ -18,12 +18,17 @@ const transcribeNote = async (req, res) => {
       return res.status(400).json({ error: 'No audio file uploaded' });
     }
 
-    const audioPath = req.file.path;
+        const audioPath = req.file.path;
     console.log(`[Transcribe] Processing file: ${audioPath}`);
+
+    // Create a file-like object with a proper extension to tell Whisper the format
+    const originalName = req.file.originalname || 'audio.m4a';
+    const fileStream = fs.createReadStream(audioPath);
+    const fileObject = await OpenAI.toFile(fileStream, originalName);
 
     // Call Whisper API
     const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(audioPath),
+      file: fileObject,
       model: 'whisper-1',
     });
 
