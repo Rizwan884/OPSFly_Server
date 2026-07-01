@@ -21,6 +21,19 @@ const mockAuth = async (req, res, next) => {
 
 router.use(mockAuth);
 
+// POST /api/users/push-token — register push token
+router.post('/push-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (token === undefined) return res.status(400).json({ error: 'Token is required' });
+    req.user.fcmToken = token || null;
+    await req.user.save();
+    return res.json({ success: true, message: token ? 'FCM token saved' : 'FCM token cleared' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to save FCM token', detail: error.message });
+  }
+});
+
 // GET /api/users — get users (scoped by role)
 router.get('/', async (req, res) => {
   try {

@@ -9,6 +9,7 @@ const organizationsRouter = require('./routes/organizations');
 const locationsRouter = require('./routes/locations');
 const usersRouter = require('./routes/users');
 const notificationsRouter = require('./routes/notifications');
+const tasksRouter = require('./routes/tasks');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -46,6 +47,7 @@ app.use('/api/organizations', organizationsRouter);
 app.use('/api/locations', locationsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/tasks', tasksRouter);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'OpsFly API' }));

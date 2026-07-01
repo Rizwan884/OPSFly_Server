@@ -1,4 +1,8 @@
 const Note = require('../models/Note');
+const User = require('../models/User');
+const Location = require('../models/Location');
+const Notification = require('../models/Notification');
+const { sendPushNotification } = require('../services/pushNotifications');
 const { analyzeTranscript } = require('../services/analyzer');
 const OpenAI = require('openai');
 const fs = require('fs');
@@ -78,13 +82,61 @@ const saveNote = async (req, res) => {
       return res.status(400).json({ error: 'transcript is required' });
     }
 
+    const selectedLocationId = req.headers['x-location-id'];
+    if (!selectedLocationId) {
+      return res.status(400).json({ error: 'x-location-id header is required' });
+    }
+
+    // Block note creation if location is inactive or soft-deleted
+    const activeLocation = await Location.findById(selectedLocationId);
+    if (!activeLocation || activeLocation.deleted || activeLocation.isActive === false) {
+      return res.status(403).json({ error: 'This location is inactive and cannot accept new notes.' });
+    }
+
     const note = await Note.create({
       transcript: transcript.trim(),
       source,
       rawAudio: rawAudio || null,
       issues: issues || [],
-      analyzedAt: analyzedAt || null
+      analyzedAt: analyzedAt || new Date(),
+      userId: req.user._id,
+      locationId: selectedLocationId,
+      organizationId: req.user.organizationId,
     });
+
+    // Trigger notification: note_added
+    try {
+      const activeLocUsers = await User.find({
+        locationIds: selectedLocationId,
+        isActive: { $ne: false },
+        deleted: { $ne: true },
+        _id: { $ne: req.user._id }
+      });
+      if (activeLocUsers.length > 0) {
+        const notificationsToCreate = activeLocUsers.map(u => ({
+          userId: u._id,
+          type: 'note_added',
+          message: `${req.user.name} added a note`,
+          relatedNoteId: note._id,
+        }));
+        await Notification.insertMany(notificationsToCreate);
+
+        // TRIGGER PUSH: notify GM/managers at that location
+        const managersToNotify = activeLocUsers.filter(u =>
+          ['owner', 'district_manager', 'gm', 'agm', 'Manager'].includes(u.role)
+        );
+        for (const mgr of managersToNotify) {
+          await sendPushNotification(
+            mgr._id,
+            'New Note Added',
+            `${req.user.name} added a note at ${activeLocation.name}`,
+            { relatedNoteId: note._id, type: 'note_added' }
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create notifications for note', err);
+    }
 
     return res.status(201).json({ success: true, note });
   } catch (error) {
@@ -99,7 +151,25 @@ const saveNote = async (req, res) => {
  */
 const getNotes = async (req, res) => {
   try {
-    const notes = await Note.find().sort({ createdAt: -1 });
+    const selectedLocationId = req.headers['x-location-id'];
+    if (!selectedLocationId) {
+      return res.status(400).json({ error: 'x-location-id header is required' });
+    }
+
+    let query = {
+      locationId: selectedLocationId
+    };
+
+    if (req.user.role === 'department_manager') {
+      const deptUsers = await User.find({
+        locationIds: selectedLocationId,
+        department: req.user.department
+      }).select('_id');
+      const deptUserIds = deptUsers.map(u => u._id);
+      query.userId = { $in: deptUserIds };
+    }
+
+    const notes = await Note.find(query).sort({ createdAt: -1 });
     return res.json(notes);
   } catch (error) {
     console.error('Get notes error:', error);
