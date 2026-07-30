@@ -1,8 +1,9 @@
 const axios = require('axios');
+const Organization = require('../models/Organization');
 
 /**
  * AI Analyzer Service
- * 
+ *
  * This service handles communication with OpenRouter to analyze
  * transcribed text and extract operational issues.
  */
@@ -19,8 +20,11 @@ const MODELS = [
   'nvidia/nemotron-3-super-120b-a12b:free'
 ];
 
-const SYSTEM_PROMPT = `You are an operations issue detector for the hospitality industry. 
-Analyze the following voice note transcript and extract all operational 
+// Fallback prompt used when an org has no IndustryConfig (or none can be
+// loaded) — kept byte-for-byte identical to the original hardcoded prompt
+// so existing behavior is unchanged for any org not yet migrated.
+const EXISTING_HARDCODED_PROMPT = `You are an operations issue detector for the hospitality industry.
+Analyze the following voice note transcript and extract all operational
 issues mentioned.
 
 For each issue return:
@@ -29,7 +33,7 @@ For each issue return:
 - quote: the exact phrase from the transcript that triggered this issue
 - suggestedTask: a short actionable task title
 
-Return ONLY a valid JSON object in this exact format, no explanation, 
+Return ONLY a valid JSON object in this exact format, no explanation,
 no markdown, no extra text:
 
 {
@@ -44,6 +48,22 @@ no markdown, no extra text:
 }
 
 If no issues are found return: { "issues": [] }`;
+
+const CATEGORY_KEY_MAP = { Staffing: 'staffing', 'Cost Risk': 'cost_risk', Maintenance: 'maintenance', Other: 'other' };
+const SEVERITY_KEY_MAP = { High: 'high', Medium: 'medium', Low: 'low' };
+
+// Adds categoryKey/severityKey alongside the existing type/severity fields
+// on every detected issue, so both the old and new formats are always
+// present in the response — existing frontends keep working unchanged.
+function enrichIssues(parsed) {
+  if (!parsed || !Array.isArray(parsed.issues)) return parsed;
+  parsed.issues = parsed.issues.map((issue) => ({
+    ...issue,
+    categoryKey: issue.categoryKey || CATEGORY_KEY_MAP[issue.type] || 'other',
+    severityKey: issue.severityKey || SEVERITY_KEY_MAP[issue.severity] || 'medium',
+  }));
+  return parsed;
+}
 
 /**
  * Helper to safely extract and parse JSON from LLM response.
@@ -68,15 +88,42 @@ function parseJSONResponse(content) {
 
 /**
  * Analyzes a transcript using Gemini API first, with OpenRouter fallback.
- * @param {string} transcript 
+ * @param {string} transcript
+ * @param {string} [organizationId] optional — when provided, loads that
+ *   org's IndustryConfig for a dynamic, industry-specific prompt. Falls
+ *   back to the original hardcoded prompt if not provided or not found.
  * @returns {Promise<Object>} Analyzed issues
  */
-async function analyzeTranscript(transcript) {
+async function analyzeTranscript(transcript, organizationId) {
   if (!transcript) {
     return { issues: [] };
   }
 
-  const unifiedPrompt = `${SYSTEM_PROMPT}\n\nTRANSCRIPT TO ANALYZE:\n"${transcript}"`;
+  let systemPrompt;
+  let issueCategories;
+
+  if (organizationId) {
+    try {
+      const org = await Organization.findById(organizationId).populate('configTemplateId');
+      if (org && org.configTemplateId) {
+        systemPrompt = org.configTemplateId.onboardingPrompts?.issueDetection;
+        issueCategories = (org.configTemplateId.issueCategories || []).map((c) => c.key).join(' | ');
+      }
+    } catch (e) {
+      console.warn('[Analyzer] Could not load IndustryConfig, using defaults:', e.message);
+    }
+  }
+
+  // fallback to existing hardcoded prompt if config not found
+  if (!systemPrompt) {
+    systemPrompt = EXISTING_HARDCODED_PROMPT;
+    issueCategories = 'staffing | cost_risk | maintenance | other';
+  }
+
+  // inject dynamic categories into prompt, if the prompt has the placeholder
+  const finalPrompt = systemPrompt.replace('{ISSUE_CATEGORIES}', issueCategories);
+
+  const unifiedPrompt = `${finalPrompt}\n\nTRANSCRIPT TO ANALYZE:\n"${transcript}"`;
 
   // 1. Try Google Gemini API directly
   if (GEMINI_API_KEY) {
@@ -102,7 +149,7 @@ async function analyzeTranscript(transcript) {
         const parsed = parseJSONResponse(content);
         if (parsed) {
           console.log('[Analyzer] Successfully analyzed using Google Gemini API');
-          return parsed;
+          return enrichIssues(parsed);
         }
       }
     } catch (error) {
@@ -138,7 +185,7 @@ async function analyzeTranscript(transcript) {
       const parsed = parseJSONResponse(content);
       if (parsed) {
         console.log(`[Analyzer] Successfully analyzed using OpenRouter ${model}`);
-        return parsed;
+        return enrichIssues(parsed);
       }
     } catch (error) {
       const errorData = error.response?.data?.error || error.message;
