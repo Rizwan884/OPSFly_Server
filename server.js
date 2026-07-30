@@ -11,6 +11,13 @@ const usersRouter = require('./routes/users');
 const notificationsRouter = require('./routes/notifications');
 const tasksRouter = require('./routes/tasks');
 const testPushRouter = require('./routes/testPush');
+const analyticsRouter = require('./routes/analytics');
+const reportsRouter = require('./routes/reports');
+const summaryRouter = require('./routes/summary');
+const vaultRouter = require('./routes/vault');
+const uploadRouter = require('./routes/upload');
+const configRouter = require('./routes/config');
+const captureRouter = require('./routes/capture');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -50,6 +57,13 @@ app.use('/api/users', usersRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/test-push', testPushRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/summary', summaryRouter);
+app.use('/api/vault', vaultRouter);
+app.use('/api/upload', uploadRouter);
+app.use('/api/config', configRouter);
+app.use('/api/capture', captureRouter);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'OpsFly API' }));

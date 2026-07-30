@@ -17,3 +17,6 @@ npm-debug.log*
 
 # Uploads
 uploads/
+
+# DB backups (contain real user data — never commit)
+backups/

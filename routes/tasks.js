@@ -5,6 +5,8 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { sendPushNotification } = require('../services/pushNotifications');
 
+const PRIORITY_KEY_MAP = { High: 'high', Medium: 'medium', Low: 'low' };
+
 // Mock auth middleware for Express routes
 const mockAuth = async (req, res, next) => {
   try {
@@ -126,6 +128,7 @@ router.post('/', async (req, res) => {
     const task = await Task.create({
       title: title.trim(),
       priority,
+      priorityKey: PRIORITY_KEY_MAP[priority] || 'medium',
       sourceNoteId: sourceNoteId || null,
       sourceIssueType: sourceIssueType || null,
       dueDate,

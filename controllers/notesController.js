@@ -2,6 +2,7 @@ const Note = require('../models/Note');
 const User = require('../models/User');
 const Location = require('../models/Location');
 const Notification = require('../models/Notification');
+const TenantMemory = require('../models/TenantMemory');
 const { sendPushNotification } = require('../services/pushNotifications');
 const { analyzeTranscript } = require('../services/analyzer');
 const OpenAI = require('openai');
@@ -40,7 +41,7 @@ const transcribeNote = async (req, res) => {
     console.log(`[Transcribe] Whisper result: ${transcript}`);
 
     // M2: Trigger AI analysis automatically after transcription
-    const analysis = await analyzeTranscript(transcript);
+    const analysis = await analyzeTranscript(transcript, req.user.organizationId);
 
     return res.json({ 
       transcript,
@@ -62,7 +63,7 @@ const analyzeNote = async (req, res) => {
     if (!transcript) {
       return res.status(400).json({ error: 'transcript is required' });
     }
-    const analysis = await analyzeTranscript(transcript);
+    const analysis = await analyzeTranscript(transcript, req.user.organizationId);
     return res.json(analysis);
   } catch (error) {
     console.error('Analysis error:', error);
@@ -103,6 +104,28 @@ const saveNote = async (req, res) => {
       locationId: selectedLocationId,
       organizationId: req.user.organizationId,
     });
+
+    // Create TenantMemory from saved note (Vault 1)
+    try {
+      const memoryContent = `${note.transcript}. Issues detected: ${
+        (note.issues || []).map(i => `${i.categoryKey || i.type}: ${i.quote}`).join(', ')
+      }`;
+
+      await TenantMemory.create({
+        organizationId: note.organizationId,
+        locationId: note.locationId,
+        memoryType: 'observation',
+        content: memoryContent,
+        metadata: {
+          sourceNoteId: note._id,
+          captureSource: note.captureSource,
+          tags: (note.issues || []).map(i => i.categoryKey || i.type)
+        }
+      });
+    } catch (e) {
+      // Don't fail note save if memory creation fails
+      console.error('TenantMemory creation failed:', e.message);
+    }
 
     // Trigger notification: note_added
     try {
